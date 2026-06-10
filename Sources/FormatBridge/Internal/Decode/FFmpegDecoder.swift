@@ -30,6 +30,9 @@ final class FFmpegDecoderImpl: VideoDecoding, @unchecked Sendable {
     private var frame: UnsafeMutablePointer<AVFrame>?
 
     private var isOpen = false
+    /// True once av_read_frame hit EOF for video and the codec was flushed — remaining
+    /// reorder-buffered frames are then drained via receive_frame alone.
+    private var videoDraining = false
 
     func open(url: URL) async throws {
         guard !isOpen else { return }
@@ -113,11 +116,22 @@ final class FFmpegDecoderImpl: VideoDecoding, @unchecked Sendable {
         guard let ctx = formatCtx, let pkt = packet, let frm = frame else {
             throw FormatBridgeError.decodeFailed("Decoder not open")
         }
+        if videoDraining {
+            return try drainVideoFrame(frm)
+        }
 
         while true {
             let ret = av_read_frame(ctx, pkt)
             if ret < 0 {
-                if ret == averrorEOF { return nil }
+                if ret == averrorEOF {
+                    // EOF: flush the codec and drain the frames still buffered by
+                    // B-frame reordering — without this the tail of the stream is lost.
+                    videoDraining = true
+                    if let cctx = videoCodecCtx {
+                        _ = avcodec_send_packet(cctx, nil)
+                    }
+                    return try drainVideoFrame(frm)
+                }
                 throw FormatBridgeError.decodeFailed("av_read_frame failed: \(avErrorString(ret))")
             }
             defer { av_packet_unref(pkt) }
@@ -130,6 +144,16 @@ final class FFmpegDecoderImpl: VideoDecoding, @unchecked Sendable {
             }
             // Skip non-video packets
         }
+    }
+
+    /// Post-EOF: pull the remaining frames out of the flushed codec.
+    private func drainVideoFrame(_ frm: UnsafeMutablePointer<AVFrame>) throws -> DecodedVideoFrame? {
+        guard let cctx = videoCodecCtx else { return nil }
+        let ret = avcodec_receive_frame(cctx, frm)
+        if ret == negEAGAIN || ret == averrorEOF { return nil }
+        guard ret >= 0 else { return nil }
+        defer { av_frame_unref(frm) }
+        return try makeDecodedVideoFrame(frame: frm)
     }
 
     func decodeNextAudioBuffer() async throws -> DecodedAudioBuffer? {
@@ -194,6 +218,7 @@ final class FFmpegDecoderImpl: VideoDecoding, @unchecked Sendable {
 
         if let vctx = videoCodecCtx { avcodec_flush_buffers(vctx) }
         if let actx = audioCodecCtx { avcodec_flush_buffers(actx) }
+        videoDraining = false
     }
 
     func close() {
@@ -204,6 +229,7 @@ final class FFmpegDecoderImpl: VideoDecoding, @unchecked Sendable {
         if audioCodecCtx != nil { avcodec_free_context(&audioCodecCtx) }
         if formatCtx != nil { avformat_close_input(&formatCtx) }
         isOpen = false
+        videoDraining = false
     }
 
     deinit {
@@ -263,6 +289,13 @@ final class FFmpegDecoderImpl: VideoDecoding, @unchecked Sendable {
         guard ret >= 0 else { return nil }
         defer { av_frame_unref(frame) }
 
+        return try makeDecodedVideoFrame(frame: frame)
+    }
+
+    /// Convert a received AVFrame into a DecodedVideoFrame (shared by the packet + drain paths).
+    private func makeDecodedVideoFrame(
+        frame: UnsafeMutablePointer<AVFrame>
+    ) throws -> DecodedVideoFrame {
         let width = Int(frame.pointee.width)
         let height = Int(frame.pointee.height)
         let srcFmt = AVPixelFormat(rawValue: frame.pointee.format)
