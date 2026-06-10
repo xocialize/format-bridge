@@ -1,0 +1,10 @@
+.build/
+.swiftpm/
+.DS_Store
+# Built static libraries — NOT committed; run scripts/build-ffmpeg.sh / build-oxipng.sh
+/Sources/FFmpegXC/lib/
+/Sources/COxipng/lib/
+# FFmpeg build workspace
+/scratch/
+# Rust build artifacts
+/rust/target/
