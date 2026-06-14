@@ -1,5 +1,17 @@
 # format-bridge
 
+> ## ⚠️ DEPRECATED & ARCHIVED (2026-06-13)
+> `format-bridge` is **retired**. Its FFmpeg dependency (`.unsafeFlags` + ~100 MB vendored static
+> libs + LGPL) made it non-net-distributable, so it was replaced by an FFmpeg-free, pure-Swift /
+> native-Apple stack with **zero vendored binaries**:
+> - **[`frame-stream-native`](https://github.com/xocialize/frame-stream-native)** — the N:M frame-transform seam (RIFE / SeedVR2).
+> - **[`matroska-swift`](https://github.com/xocialize/matroska-swift)** — pure-Swift MKV/WebM demuxer.
+> - **[`media-bridge`](https://github.com/xocialize/media-bridge)** — the successor foundation: any-container→native HEVC+AAC normalizer, probe, ImageBridge stills, and a pure-Swift SSIMULACRA2 (no libjxl binary).
+>
+> No further development here. Read-only for history.
+
+---
+
 The **media I/O + encode + measure foundation** for Apple-Silicon media pipelines — extracted
 from `xocialize/forge-studio-optimizer` per **ADR-0024** (extraction pin: forge `fa146b5d`).
 This is Layer 2 of the MLXEngine cross-modal optimization service, and it exists to serve two
